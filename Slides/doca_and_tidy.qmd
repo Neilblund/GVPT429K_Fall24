@@ -56,7 +56,8 @@ We'll also run `doca<-as_factor(doca)` to convert some Stata formatted informati
 
 ```{r}
 
-doca<-read_dta('final_data_v10.dta')
+doca<-read_dta('final_data_v10.dta', 
+               encoding='latin1') # this option might fix issues for mac users
 doca<-as_factor(doca)
 
 ```
@@ -160,11 +161,15 @@ nrow(doca_1980)
 
 #### Question 2
 
-How would I create a data set containing only the events where police were killed?
+How would I create a data set containing only the events where a person was killed?
 
 ```{r q2}
 #Q2
+docadeaths<-doca|>
+  filter(deaths == 1)
 
+# view the first few rows: 
+slice_head(docadeaths, n=5)
 
 ```
 
@@ -255,7 +260,7 @@ When making inferences, we often need to make a comparison across one or more gr
 1.  count the number of events with and without counter demonstrators
 2.  calculate the proportion of events in each group that were violent vs. non-violent.
 
-We can easily add another variable to the count function like this (and we can use the `drop_na` function to remove missing data)
+We can easily add another variable to the count function like this (and we can use the `drop_na` function to remove missing data from our result set)
 
 ```{r}
 
@@ -375,7 +380,11 @@ ggplot(yearly_events, aes(x=evyy, y=n, color=violence)) +
 
 ```
 
-# Function reference
+# function reference
+
+This is a list of functions used in this document, along with some additional examples of how they work. If you're looking for even more detail, the best place to look is in the help file for that function, which you can access by running `help(function name here)` in the R console.
+
+Most of these functions come from the `dplyr` package, which has some [very nice online documentation](https://dplyr.tidyverse.org/) as well.
 
 ## slice\_\*
 
@@ -386,6 +395,33 @@ ggplot(yearly_events, aes(x=evyy, y=n, color=violence)) +
 doca|>
   slice_head(n=5)
 
+
+```
+
+## drop_na
+
+`drop_na` will remove any `NA` values from the data set.
+
+If you run `drop_na` without adding any variable names in parentheses, you will drop rows that have `NA` in ANY column:
+
+```{r}
+
+# drop ALL rows with missing data
+doca_no_na <-doca|>
+  drop_na()
+
+# all rows have at least *SOME* missing data, so we lose everything here: 
+nrow(doca_no_na)
+
+```
+
+However, you can specify which variables you want to consider when removing data by adding them as arguments to `drop_na`. So if I wanted to drop only rows where the `act1` variable was missing, I could run:
+
+```{r}
+doca_act1<-doca|>
+  drop_na(act1)
+
+nrow(doca_act1)
 
 ```
 
@@ -417,6 +453,14 @@ doca|>
 
 ```
 
+Note that you'll occasionally see `%>%` in place of `|>`, usually in older R code. This functions more-or-less the same way that `|>` does.
+
+```{r}
+doca%>%nrow()
+
+
+```
+
 ## count
 
 `count` will count the number of rows based on one or more groups. (this works very similarly to `table` but it returns a `tibble` object).
@@ -437,9 +481,21 @@ doca|>
 
 ```
 
+I can count on data on multiple dimensions as well. This code would give me the count of all unique combinations of the `viold` and `counterd` variables.
+
+```{r}
+
+
+doca|>
+  count(viold,counterd)
+
+```
+
+By default, count will also include counts of the `NA` categories, but we can remove these with the `drop_na` function.
+
 ## arrange
 
-`arrange` will filter rows of a data set by some value. Using a `-` in front of a variable name will sort from highest to lowest instead of lowest to highest:
+`arrange` will filter rows of a data set by some value. Using a `-` in front of a variable name will sort from highest to lowest instead of lowest to highest. So this example will sort the data based on `evyy` (the event year) from the highest to lowest. (remember that `slice_head` just lets us see the first few rows of the data instead of printing everything)
 
 ```{r}
 
@@ -465,9 +521,9 @@ doca|>
 
 ## group_by
 
-`group_by` is used to create a grouped data frame. On its own, this doesn't do much, but functions like `mutate` and `slice_head` and `summarize` will allow us to do calculations over groups instead of operating on the entire data set.
+`group_by` is used to create a grouped data frame. On its own, this doesn't do much, but functions like `mutate` and `slice_head` and `summarize` will allow us to do calculations over specified groups instead of operating on the entire data set.
 
-For example the code below gets the first event in each year:
+For example `slice_head` will ordinarily give us the first `n` rows from the data set, but if I use `slice_head` with group by, **I'll get the first `n` rows from each group:**
 
 ```{r}
 
@@ -475,5 +531,51 @@ For example the code below gets the first event in each year:
 doca|>
   group_by(evyy)|>
   slice_head(n=1)
+
+```
+
+So we'll use `group_by` when we need to do things like "calculate the average number of events per year" or "find the largest protest in each state" - anything that involves calculating a single statistic over a multiple categories.
+
+## case_when
+
+Case when will allow us to "recode" our data based a series of logical expressions. This is useful for data sets like the current one where we want to add descriptive labels to categorical variables that initially only have numeric codes.
+
+```{r}
+
+
+doca <- doca |>
+  mutate(
+    counter_demonstrators = case_when(
+      counterd == 1 ~ "counter demonstrators present",
+      counterd == 0 ~ "counter demonstrators not present"
+    )
+  )
+
+
+doca|>
+  count(counter_demonstrators)
+
+```
+
+We can also use `case_when` statements to create variables based on multiple columns and conditions. For instance, if I wanted to create a new variable that indicated whether both violence and property damage occurred at an event, I could write something like this:
+
+```{r}
+
+doca <- doca |>
+  mutate(
+    violence_and_property_damage = case_when(
+      viold==1 & propdam ==1  ~ "violence and property damage",
+      viold==1 & propdam ==0  ~ "violence only",
+      viold==0 & propdam ==1  ~ "property damage only",
+      viold==0 & propdam ==0  ~ "no violence or property damage",
+
+
+
+    )
+  )
+
+
+doca|>
+  count(violence_and_property_damage)
 
 ```
