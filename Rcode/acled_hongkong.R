@@ -102,35 +102,3 @@ events_plot_modified<-ggplot(monthly_events, aes(x=month, y=n, fill=sub_event_ty
 events_plot_modified
 
 
-
-#Advanced: using a rolling average----
-library(zoo)
-
-rolling_counts<-hk_events|>
-  filter(event_type %in% c("Protests", "Riots"))|>
-  mutate(event_date= factor(event_date),
-         sub_event_type = factor(sub_event_type)
-         )|>
-  count(sub_event_type, event_date, .drop=FALSE)|>
-  group_by(sub_event_type)|>
-  mutate(event_date = as.Date(event_date))|>
-  arrange(event_date)|>
-  mutate(rollsum = rollsum(n, 30, fill=NA)
-         )
-
-
-ggplot(rolling_counts, aes(x=event_date, y=rollsum, 
-                           color=sub_event_type,
-                           group = sub_event_type
-                           )) +  
-  geom_line() +
-  scale_x_date(date_breaks = "3 months" , date_labels = "%b-%y") +
-  theme_bw() 
-  
-
-
-
-
-
-
-
