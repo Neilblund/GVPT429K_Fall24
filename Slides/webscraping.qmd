@@ -1,0 +1,523 @@
+---
+title: "Webscraping"
+format:
+  html:
+    df-print: paged
+    toc: true
+    toc-location: left
+    toc-depth: 4
+    smaller: true
+    self-contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+library(rvest)
+library(tidyverse)
+library(lemon)
+library(knitr)
+knit_print.data.frame <- lemon_print
+page<-'<!DOCTYPE html>
+<html>
+<head>
+<title>Page Title</title>
+</head>
+<body>
+
+<h1>This is a Heading</h1>
+<p>This is a paragraph.</p>
+<div>
+  <p>This is a paragraph inside a divider</p>
+</div>
+<p class="custom"> This is a paragraph with a custom class</p>
+<h1 class="custom"> This is a header with a custom class</h1>
+
+<a href="https://wwww.google.com"this is a link</a>
+<a href="https://c.com"this is also a link</a>
+
+</body>
+</html>'
+
+
+```
+
+This notebook lays out some basic techniques for scraping text data from the web and analyzing it in R. Webscraping is a technique for extracting text and data from websites programmatically, usually at a scale that would be unfeasible for a person. We'll be using the web site of the UK-based environmental organization [Extinction Rebellion](https://rebellion.global/) as our example.
+
+Some use-cases for web scraping are:
+
+-   Collecting lots of online text for a qualitative or quantitative text analysis (the current example)
+
+-   Gathering event data from news organizations on a regular schedule (ex: [Countlove](https://www.tommyleung.com/countLove/index.htm))
+
+-   Tracking large scale online censorship (as in [this paper](https://gking.harvard.edu/publications/how-Censorship-China-Allows-Government-Criticism-Silences-Collective-Expression) on censorship in China)
+
+When researching contentious politics, this may not always be an option, so this is **not** a requirement for this class. If you have a relatively small amount of text (or if the content you want is hidden behind a paywall) you might be better off simply copy-pasting that text into a spreadsheet manually. If you do want to pursue something like this on a final project, I'm happy to work with you to get this working.
+
+## Packages
+
+We will use [rvest](https://rvest.tidyverse.org/) and [xml2](https://xml2.r-lib.org/) to scrape sites. If you've already installed the tidyverse, you probably already have these and so you just need to run the code below to have everything you need for this portion.
+
+```{r}
+
+library(tidyverse)
+library(rvest)
+library(xml2)
+
+```
+
+## Basic HTML
+
+HTML (HyperText Markup Language) is the language that websites use to tell your web browser how to display and structure the content on a website. Right clicking and selecting "inspect" in most web browsers will show the HTML structure of a page.
+
+If you go over to [google.com](https://www.google.com/) you'll see an image that looks something like this:
+
+![](images/google%20front%20page.png)
+
+But -- behind the scenes -- your computer actually sees something like this:
+
+![](images/google_html.png)
+
+All that messy text is the HTML code. The HTML code uses tags like `<p>some text</p>` that can be interpreted by your web browser. Most modern websites will have a complex nested structure that allows them to consistently style information on the page. When we're webscraping, we can use that same structure to locate and extract the information we want from each page.
+
+## Example HTML
+
+Here's some simple HTML code we can use for a couple of examples.
+
+This is some HTML code we will use for the next few examples. Click on the "rendered HTML" tab to see how this would look if you were actually viewing it on a website.
+
+::: panel-tabset
+### Raw HTML Code
+
+```         
+<html>
+  <head>
+    <title>Page Title</title>
+  </head>
+
+  <!-- This is a comment, it is ignored by the web browser -->
+  <body>
+
+    <h1>This is a Heading</h1>
+    <p>This is a paragraph.</p>
+    <div>
+      <p>This is a paragraph inside a divider</p>
+    </div>
+    <p class="custom"> This is a paragraph with a custom class</p>
+    <h1 class="custom"> This is a header with a custom class</h1>
+
+    <a href="https://www.google.com"this is a link</a>
+    
+    <br> <!-- The <br> tag causes a new line -->
+    
+    <a href="https://cnn.com">this is a link to CNN.com</a>
+
+  </body>
+  
+</html>
+  
+```
+
+### Rendered HTML
+
+::: {style="border: 1px solid black;"}
+```{=html}
+
+<html>
+  <head>
+    <title>Page Title</title>
+  </head>
+  <!-- This is a comment, it is ignored by the web browser -->
+  <body>
+
+    <h1>This is a Heading</h1>
+    <p>This is a paragraph.</p>
+    <div>
+      <p>This is a paragraph inside a divider</p>
+    </div>
+    <p class="custom"> This is a paragraph with a custom class</p>
+    <h1 class="custom"> This is a header with a custom class</h1>
+
+    <a href="https://www.google.com"this is a link</a>
+    
+    <br> <!-- This is a line break -->
+    
+    <a href="https://cnn.com">this is a link to CNN.com</a>
+
+  </body>
+</html>
+```
+:::
+:::
+
+## Scraping text
+
+For the moment, I've placed this code on github at [this link](https://raw.githubusercontent.com/Neilblund/APAN/main/example.html).
+
+I'm going to use `read_html` to read the HTML file into R, then I'll use the `html_elements` function to extract some text from the page. `html_elements(css = 'p')` is going to extract everything inside of a `<p>` tag. `html_elements(css = 'div')` would extract everything inside of a `<div>` tag, and so on.
+
+```{r, echo=T}
+
+
+webpage<-read_html("https://raw.githubusercontent.com/Neilblund/APAN/main/example.html")
+
+webpage|>
+  html_elements(css = 'p') # find the stuff inside of p tags
+
+
+```
+
+From here, we can use `html_text()` to remove the tags from our selected elements and get just the regular human-readable text:
+
+```{r}
+
+webpage|>
+  html_elements(css = 'p')|>
+  html_text()
+
+```
+
+Most websites will use `<p>` tags for article text, so what we ran above may be just fine for a simpler site, but what if we want something more specific? For instance: we might need to grab only the text that is inside of a particular divider. In order to do that, we can use a more complex CSS expression.
+
+The `css="p"` part of this command is using a [CSS selector](https://www.w3schools.com/cssref/css_selectors.php) to get the elements we want. CSS is normally used to style specific elements of a website, but we can use it here to navigate the HTML tree to find more specific parts of the website. For instance, if we just wanted to grab `<p>` elements that occur inside of a `<div>` element, we could use `'div p'`
+
+```{r}
+webpage|>
+  html_elements(css = 'div p')|>
+  html_text()
+
+```
+
+Alternatively, if we wanted to find only those `<p>` tags where the class is "custom" then we could run:
+
+```{r}
+
+webpage|>
+  html_elements(css = 'p.custom')|>
+  html_text()
+
+```
+
+### Using Selector Gadget
+
+Learning the ins and outs of css selectors is a handy skill to have in your toolkit if you're interested in scraping, and you can find [lots of good tutorials online](https://www.scrapingbee.com/blog/using-css-selectors-for-web-scraping/#the-document-object-model). but for this project, we can make our lives a little easier by [using Hadley Wickham's SelectorGadget](https://rvest.tidyverse.org/articles/selectorgadget.html) to find the correct CSS selector expression for a website visually. This won't work perfectly every time, but will generally be a good starting point for simpler scrapes.
+
+#### Extinction Rebellion
+
+The global site for Extinction Rebellion has around 180 blog posts as of March 2024. This is probably more than we would want to manually copy, but its a good example of a case where we could use a webscrape to automatically gather their posts. Not only would this give us the entire collection of blogs, it would make it really easy for us to update our collection as new posts come in by just re-running our script.
+
+If we head over to the "blog" section of their site, you'll see they've got all of their posts displayed in little cards with an image and some summary text. Clicking one of the cards will take you to the link for that post. We'll start by extracting content from a single page. I'll use [newsletter 86 as our initial example](https://rebellion.global/blog/2024/03/15/global-newsletter-86/).
+
+```{r}
+site<-'https://rebellion.global/blog/2024/03/15/global-newsletter-86/'
+
+sitecode<-read_html(site)|>
+  html_elements(css='p')|>
+  html_text()
+
+
+```
+
+In our case, we're probably fine with just combining all of the data into one long blob of text, so we'll use `str_flatten` and `str_squish` to collapse all of the separate paragraphs into a single object, and remove extraneous spacing.
+
+```{r}
+
+site<-'https://rebellion.global/blog/2024/03/15/global-newsletter-86/'
+
+sitecode<-read_html(site)|>
+  html_elements(css='p')|>
+  html_text()|>
+  str_flatten()|>
+  str_squish()
+
+
+```
+
+This works pretty well for a single page, but it would be pretty tedious to type out the URLs for every single page, but - if we can compile a list of all the relevant URLS - we can use a loop to apply this same scraping procedure to all 180 or so blog entries. The first step will be to compile the relevant URLS. We can do this by navigating to [blog section of the site](https://rebellion.global/news/#blog). From here, we want to use the SelectorGadget to highlight all of the links. Then we can use the resulting css selector to select all the URLS:
+
+```{r}
+
+url<-"https://rebellion.global/news/"
+
+blogs<-read_html(url)
+
+
+urls<-blogs|>
+  html_elements(".text-2xl")
+
+
+
+head(urls) # show the first few results
+
+
+ 
+
+```
+
+HTML hyperlinks will look something like this:`<a href="www.website.com">some text</a>`. The stuff between the `<a>` tags will usually be the part that you see in your browser, but the actual URL will be stored as an `href` attribute. To grab this attribute, we'll need to use `html_attr` instead of `html_text`.
+
+One last thing we need here: you'll notice that the URL listed here doesn't look like a complete web address. The full address is:
+
+[`https://rebellion.global/blog/2024/03/15/global-newsletter-86/`](https://rebellion.global/blog/2024/03/15/global-newsletter-86/)
+
+But we only see:
+
+`blog/2024/03/15/global-newsletter-86/`
+
+...in the href attribute. This is called a [relative URL](https://developer.mozilla.org/en-US/docs/Learn/Common_questions/Web_mechanics/What_is_a_URL#absolute_urls_vs._relative_urls). Your browser understands implicitly that this link should have the current domain address appended onto the front of it. So to make this a complete link, we're just going to use the [`url_absolute`](https://search.r-project.org/CRAN/refmans/xml2/html/url_absolute.html).
+
+```{r}
+url<-"https://rebellion.global/news/"
+
+blogs<-read_html(url)
+
+
+urls<-blogs|>
+  html_elements(".text-2xl")|>
+  html_attr('href')|>
+  url_absolute("https://rebellion.global/news/") # convert to an absolute URL 
+  
+  
+head(urls) # show the first few results
+
+```
+
+# Scraping in a loop
+
+In the last section, we figured out how to grab the links to all of the blog posts on Extinction Rebellion's site, so now we just need to visit each one and extract the text. Fortunately, we don't have to write the same code 179 times to do this. Instead, we can use a loop to perform this action on each item in our list.
+
+A loop will simply execute the code inside of the `{}` repeatedly. The `for(i in urls)` part of this code tells R "repeat the code below for every element in the list of `urls`, and use the `i` variabe to represent the current URL". So this code is going to visit each link, download the full text of the newsletter at that URL, and then add that result to an empty data frame called `newsletters`.
+
+```{r, echo=TRUE, eval=FALSE}
+
+# making an empty data frame
+
+newsletters<-data.frame()
+
+for(i in urls) {
+  
+    # read the URL 
+  fulltext<-read_html(i)|>
+    html_nodes("p")|> # get stuff inside of <p> tags (this is regular text)
+    html_text()|> # get just the text 
+    str_flatten(collapse= " ")|> # combine into a big blob of text
+    str_squish() #  remove extra spaces
+  
+  # put this result in a data frame
+  result<-data.frame(url = i,
+                     fulltext = fulltext
+                     )
+  
+  # add each row to the newsletters data frame
+  newsletters<-bind_rows(newsletters, result)
+  
+  print(i) # print after each iteration (so you can watch the progress)
+  Sys.sleep(.5) # half a second pause between each request
+  
+}
+
+
+
+```
+
+This will probably take a couple of minutes to run. So start it up and then maybe go grab a sandwich. When you come back, you'll want to save the results so you don't have to do this all over again from scratch. Remember that you can save results by running:
+
+```{r, eval=FALSE}
+write_csv(newsletters, file="newsletters.csv")
+
+```
+
+
+I've uploaded a recent copy of this to github, so you can actually just grab it by running the code below: 
+
+```{r}
+newsletters<-read_csv('https://raw.githubusercontent.com/Neilblund/APAN/refs/heads/main/newsletters.csv')
+
+```
+
+
+# Analyzing Texts
+
+The next section will walk through the process of analyzing texts once you've retrieved them. We'll use the `tidytext` package for some basic text processing, and we'll use the `textdata` package for sentiment analysis.    
+
+
+```{r}
+#install.packages('tidytext')
+#install.packages('textdata')
+
+library(tidytext)
+library(textdata)
+
+
+
+```
+
+## Terms in context
+
+Now that we have our collection of text, what can we do with it? A good starting point for this kind of analysis is usually to read some of the documents, and/or look around for examples of how the organizations are talking about specific issues. I think Extinction Rebellion will be particularly likely to talk about the role of global capitalism in climate change, so I might want to start by reading some example documents that include the term "capitalism". 
+
+
+In order to make this a little more manageable, I'm going to split each document up into individual sentences and then I'll use the `filter` function to create a list of only those sentences that mention capitalism. 
+
+The command below will split each document into individual sentences, and return a dataframe with one row per sentence: 
+
+```{r}
+library(tidytext)
+
+text <- newsletters|>
+  unnest_tokens(output = 'sentence' , input = 'fulltext', token='sentences')
+
+# look at the first rows
+text|>
+  slice_head(n=10)
+```
+
+
+Now I can filter this list to only include sentences that contain the string "capitalis" using the `str_detect` function. (the `unnest_tokens` command already put the texts into lower-case form, so I don't have to word about case sentivity here)
+
+```{r}
+# find all sentences that mention capitalism
+capitalism<-text|>
+  filter(str_detect(sentence, "capitalis"))
+
+
+# look at the first 10 sentences
+
+capitalism|>
+  slice_head(n=10)
+
+```
+
+
+Now I have a good starting point for some exploratory analysis. I could read through a few of these in R-studio by using the `view()` function, or I could use `write_csv` to export them into a spreadsheet and read them in excel or some other spreadsheet viewer. 
+
+# Term Comparisons
+
+Another way we can use text quantitatively is by comparing term frequencies across sources or documents. For instance: we might be interested in comparing how different organizations use different rhetorical strategies. 
+
+I have a collection of press releases from the (more mainstream) Environmental Defense Fund that I've combined with the Extinction Rebellion documents. So I can use this to get a sense of the distinct framings of each organization. 
+
+
+```{r}
+
+# read in the data
+source_url <- 'https://raw.githubusercontent.com/Neilblund/APAN/refs/heads/main/combined_newsletters.csv'
+combined_newsletters<-read_csv(source_url)
+
+
+```
+
+
+Now we'll split this document by sentence again and then write some regular expressions to capture words or phrases that seem like they might indicate a particular frame, then I'll calculate the proportion of sentences in each set of documents that contains these frame words I'm interested in:
+
+```{r}
+
+
+term_frequencies<-
+  combined_newsletters|>
+  unnest_tokens(output = 'sentence' , input = 'fulltext', token='sentences')|>
+  mutate(
+    'urgency' = str_detect(sentence, "urgent|future|\\bnow\\b|imperative|disaster|time|must"),
+    'protest' = str_detect(sentence, 'protest|demonstration|direct action'),
+    'capitalism' = str_detect(sentence, 'capitalist|capitalism|neoliberal'),
+    'corporate' = str_detect(sentence, "corporate|corporation"))|>
+  group_by(source)|>
+  summarise(capitalism = sum(capitalism)/n(),
+            corporate = sum(corporate)/n(),
+            urgency = sum(urgency)/n(),
+            protest = sum(protest)/n()
+            
+            )|>
+  ungroup()
+
+
+term_frequencies
+
+
+```
+
+
+
+## Sentiment Analysis
+
+We can use dictionary-based sentiment analysis to get a sense of the differences in the emotions expressed across different sources. For this analysis, rather than splitting by sentence, we're going to split the full text column here so that each row contains just one word. We'll use the same `unnest_tokens` function from before, but now with `token='words'` instead of `token='sentences'`
+
+
+We'll also filter out the terms "extinction, rebellion, environmental, defense, and fund" from our list of tokens entirely. Since these are just the names of our sources, we want to avoid having them count towards how we categorize the emotions of each post.
+
+```{r}
+words_filtered<- combined_newsletters|>
+  unnest_tokens(output = 'word' , input = 'fulltext', token='words')|>
+  filter(! word %in% c("extinction", "rebellion", "environmental","defense", "fund"))
+
+# view the first few rows of data:
+words_filtered|>
+  slice_head(n=10)
+
+
+```
+
+Next, we'll import the NRC Word-Emotion Lexicon. The NRC is a crowd sourced dictionary of terms associated with eight basic emotions: anger, disgust, fear, sadness, anticipation, joy, surprise, and trust and two sentiments (positive or negative). We can access the dictionary with the `get_sentiments` function:
+
+```{r}
+
+nrc<-get_sentiments("nrc")
+
+# view the first rows of the NRC data
+nrc|>
+  slice_head(n=10)
+
+
+```
+
+
+We're going to apply just the emotions portion of this dictionary to our texts, so we'll filter out the "positive" and "negative" dictionary words. We'll also use `fct_relevel` just to reorder everything so that more negative emotions show up together when we make our plot.
+
+```{r}
+
+nrc_emotions<-get_sentiments("nrc")|>
+  filter(!sentiment %in% c("positive", "negative"))|>
+  mutate(sentiment = fct_relevel(sentiment, 'anger', 'disgust', 'fear','sadness'))
+  
+```
+
+
+
+Finally, I'll use a `left_join` to combine the word list with the sentiment dictionary and then use the `count` function to see how many sentiment terms occur in each document. Then we'll calculate the % of emotion terms in each document as a proportion of the total number of words with ANY emotion expressed. In other words:
+
+$$
+\text{fear proportion} = \frac{\text{fear words}}{\text{total emotion words}}
+$$
+
+```{r}
+
+sentiments<-words_filtered|>
+  # left join with the sentiment dictionary
+  left_join(nrc_emotions, by=join_by(word == word))|>
+  # filter words without any sentiment 
+  filter(!is.na(sentiment))|>
+  # count the number of each sentiment in each document
+  count(url, sentiment, source)|>
+  # calculate sentiment as a proportion of total emotion words in the document
+  group_by(url, source)|>
+  mutate(sentiment_prop = n / sum(n))|>
+  ungroup()
+
+sentiments|>
+  slice_head(n=10)
+
+```
+
+Now, we can create a set of box-plots to compare sentiment expressions across each source. Remember that the center line on each box represents the mean for that emotion.
+
+```{r}
+ggplot(sentiments, aes(y=sentiment, x=sentiment_prop, fill=source)) + 
+  # notches give a rough sense of statistical significance
+  geom_boxplot(notch=TRUE) +
+  theme_bw() +
+  xlab("Proportion with emotion") +
+  ylab("Emotion")
+```
+
+Unsurprisingly, Extinction Rebellion is generally more likely to use terms associated with negative emotions like fear or anger when compared to EDF. 
+
+
