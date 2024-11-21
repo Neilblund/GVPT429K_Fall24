@@ -1,0 +1,316 @@
+---
+title: "Mapping"
+format:
+  html:
+    df-print: paged
+    toc: true
+    toc-location: left
+    toc-depth: 4
+    smaller: true
+    self-contained: true
+---
+
+```{r setupchunk, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE, cache=T,
+                      htmltools.dir.version = FALSE, htmltools.preserve.raw = FALSE)
+```
+
+Packages you might need to install:
+
+```{r, eval=FALSE}
+
+install.packages(c('ggmap',"leaflet", 'leaflet.extras', 'crosstalk', 'htmlwidgets'))
+
+
+```
+
+# Making maps
+
+Since the ACLED (and many other event data sets) are already coded by location, it can be useful to use a map to present results.
+
+## Getting Data
+
+We'll import some data for Brazil
+
+```{r}
+
+library(acled.api)
+library(tidyverse)
+library(ggmap)
+
+
+events<-acled.api(
+  email.address = Sys.getenv("ACLED_EMAIL"), 
+  access.key = Sys.getenv("ACLED_API_KEY"),  
+  start.date = "2024-01-01",
+  end.date = Sys.Date(),
+  country = "Brazil",
+  all.variables = TRUE                       
+)
+
+
+events<-events|>
+  # only keeping events with high level of location precision
+  filter(geo_precision == 1) |>
+  mutate(latitude = as.numeric(latitude),
+         longitude = as.numeric(longitude),
+         event_date = as.Date(event_date)
+         )
+
+```
+
+## Generating a static map
+
+Now we'll get a bounding box for these results. The bounding box will control the portion of the world map we retrieve:
+
+```{r}
+
+events_by_location<- events|>
+  count(latitude, longitude, event_type)
+
+
+bbox<-make_bbox(longitude, latitude, data=events_by_location)
+
+```
+
+Next, we'll retrieve some map tiles from Stadia. This API is free to use for non-commericial applications, but we do need to sign up and set an API key. You can sign up here:
+
+<https://client.stadiamaps.com/signup/>
+
+After that, you should be able to access an API key here:
+
+<https://client.stadiamaps.com/dashboard/#/property/17475/>
+
+Finally, you can set your key in R by running:
+
+```{r}
+
+register_stadiamaps(key = "YOUR API KEY HERE", write=TRUE)
+
+
+```
+
+Now, we'll load the data. You get an error message about needing a smaller mapping space here. You can lower the zoom size (or leave this argumnent out entirely to set it automatically) but you might lose some resolution as a result.
+
+```{r, eval=FALSE}
+
+map<-get_map(bbox, source='stadia', 
+             # remove this argument or lower the value to get faster results
+             zoom=5, 
+             maptype='stamen_terrain')
+
+
+```
+
+Since this can take a minute to load, you might want to save your results to a file so you can reuse them in a later session without having to wait for everything to download all over again.
+
+```{r, eval=FALSE}
+
+save(map, file = "stamen_map.RData")
+
+```
+
+Just running the `ggmap` argument will return the mapping space itself. Note that, if some stuff is cut off, you can change the values of `bbox` to encompass a smaller or larger space.
+
+```{r}
+load(file = "stamen_map.RData")
+
+ggmap(map)
+
+
+```
+
+We want to add some additional aesthetics to our map. Using a similar approach to the one we use for making a `ggplot` object: we'll take the base map, and then gradually add additional geometries to it. Here, we're adding a point for each event in the event data with `geom_point`. Since we already have coordinates for each event, we can just use the latitude and longitude arguments to set the location of each point:
+
+```{r}
+
+plot <- ggmap(map) +
+  geom_point(
+    data = events_by_location,
+    aes(
+      x = longitude,
+      y = latitude))
+plot
+```
+
+I can make some additional modifications here: some locations had multiple events within the last week, so it might make sense to rescale each point by the number of events that occurred at each location. I might also want to color-code each point to indicate the type of event it represents. Finally, I'll add a title, and descriptive labels to each of the legends:
+
+```{r}
+
+plot <- ggmap(map) +
+  geom_point(
+    data = events_by_location,
+    aes(
+      x = longitude,
+      y = latitude,
+      color = event_type,
+      size = n
+    ),
+    alpha = .8
+  ) +
+  ggtitle("Events in Brazil since in 2024") +
+  labs(color = "event type", size = 'number of events')
+
+plot
+```
+
+### Saving the result
+
+Now I will want to save my plot, ideally at a relatively high resolution so it looks good in a presentation. I can use `ggsave` to save the `plot` object to a file called `mapped.tiff`. Setting `dpi=1200` here ensures that I get a high resolution image:
+
+```{r}
+
+ggsave(plot, file='mapped.tiff', dpi = 1200, height=7, width=7)
+
+```
+
+We can also facet our map to show different subsets of the data by using the `facet_wrap` argument. For instance, if I wanted to show events for each month in this data, I could do that by first getting a count of events-per-month:
+
+```{r}
+
+
+
+events_by_location_and_date<- events|>
+  # get the month for each event
+  mutate(month = floor_date(as.Date(event_date), unit='month')) |>
+  # count events per location per month
+  count(latitude, longitude, event_type, month)
+
+
+
+
+```
+
+And then creating the same plot but with the `facet_wrap` argument specified:
+
+```{r, eval=FALSE}
+
+plot_monthly <- ggmap(map) +
+  geom_point(
+    data = events_by_location_and_date,
+    aes(
+      x = longitude,
+      y = latitude,
+      color = event_type,
+      size = n
+    ),
+    alpha = .8
+  ) +
+  ggtitle("Events in Brazil in 2024") +
+  labs(color = "event type", size = 'number of events') +
+  # separate the plot into facets
+  facet_wrap(~month)
+
+ggsave(plot_monthly, file='mapped_monthly.tiff', dpi = 1200, height=7, width=7)
+
+```
+
+# Interactive Map with Leaflet
+
+We can use leaflet to create an interactive world map with our event data. The `addProviderTiles` function will draw in data from any of a number of sources. Some of these require registration, but the `OpenStreetMap` ones should be free. (View [other options here](https://leaflet-extras.github.io/leaflet-providers/preview/))
+
+```{r}
+library(leaflet)
+
+# get a base map
+base_map <- leaflet() |>
+  addProviderTiles(providers$OpenStreetMap.Mapnik) 
+base_map
+
+```
+
+Now, we can add point to our map using the `addCircles` function. We'll also create a color palette that color-codes points by event-type using the `colorFactor` function and a legend with the `addLegend` function.
+
+Note here that we're using all of the event data, instead of the data that's aggregated by location. The reason for this will become clear in a moment.
+
+```{r}
+
+pal <- colorFactor(
+  palette = 'Dark2',
+  domain = events$event_type
+)
+
+event_map<-base_map|>
+  addCircles(data = events,
+             lng=~longitude, 
+             lat=~latitude, 
+             color=~pal(event_type)
+  )|>
+  # add a legend to the bottom left
+  addLegend(position = "bottomleft", pal=pal, values=events$event_type)
+
+
+event_map
+
+
+```
+
+Now we can go a step further by adding the contents of the `notes` column as a popup over each point. You should be able to click on a point and see a description of the event at that location:
+
+```{r}
+
+event_map <- base_map |>
+  addCircles(
+    data = events,
+    lng =  ~ longitude,
+    lat =  ~ latitude,
+    popup = ~ notes,
+    color =  ~ pal(event_type)
+    
+  ) |>
+  # add a legend to the bottom left
+  addLegend(position = "bottomleft",
+            pal = pal,
+            values = events$event_type)
+
+event_map
+
+```
+
+## Saving results
+
+We can export our results to file with the `saveWidget` function. Unfortunately, you can't embed this in a powerpoint, but you could show it on your local device. Alternatively, you could just screenshot a particular view of the map.
+
+```{r, eval=FALSE}
+library(htmlwidgets)
+saveWidget(event_map, file="events.html")
+
+```
+
+## Adding a filter
+
+```{r}
+
+library(leaflet.extras)
+library(crosstalk)
+
+# make shared data
+events_sd<-SharedData$new(events)
+
+# create a new map using the shared data 
+event_map <- base_map |>
+  addCircles(
+    data = events_sd,
+    lng =  ~ longitude,
+    lat =  ~ latitude,
+    popup = ~ notes,
+    color =  ~ pal(event_type),
+    group = "event_markers"
+  ) |>
+  # add a legend to the bottom left
+  addLegend(position = "bottomleft",
+            pal = pal,
+            values = events_sd$event_type) 
+
+
+#add a column with a selection filter
+bscols(
+  widths=c(2, 10),
+  list(filter_select("type",'event', events_sd, ~event_type)),
+  
+  event_map
+)
+
+
+```
